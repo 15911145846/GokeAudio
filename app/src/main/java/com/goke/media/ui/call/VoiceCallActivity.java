@@ -29,16 +29,21 @@ import com.goke.media.jni.Java2CAPI;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import static android.view.View.INVISIBLE;
+import static android.view.View.VISIBLE;
+
 public class VoiceCallActivity extends AppCompatActivity implements IStateListener {
     private static Java2CAPI j2c = null;
     PeerInfo voicelocal = null, voiceremote = null;
-    String textInfoList = "";
+    String callInfoList = "";
     private EditText editTextCallee = null;
     private Button buttonAnswer = null;
     private Button buttonInvite = null;
     private Button buttonHangup = null;
-    private TextView textViewRegState = null;
+    private TextView textViewVersion = null;
     private TextView textViewCallState = null;
+    private TextView textViewMediaStats = null;
+
     private String username, password;
     //private int voicelocalport = 20000, voiceremoteport = -1;
     //private String voicelocaladdr = "127.0.0.1", voiceremoteaddr = null;
@@ -54,8 +59,9 @@ public class VoiceCallActivity extends AppCompatActivity implements IStateListen
         buttonInvite = (Button) findViewById( R.id.buttonC );
         buttonHangup = (Button) findViewById( R.id.buttonR );
 
-        textViewRegState = (TextView) findViewById( R.id.textViewVersion );
+        textViewVersion = (TextView) findViewById( R.id.textViewVersion );
         textViewCallState = (TextView) findViewById( R.id.textViewCallState );
+        textViewMediaStats = (TextView) findViewById( R.id.textViewMediaStats );
 
         Intent intent = getIntent();
         username = intent.getStringExtra( "username" );
@@ -65,9 +71,12 @@ public class VoiceCallActivity extends AppCompatActivity implements IStateListen
 
         j2c = new Java2CAPI();
         String sdkVersion = j2c.cosdkVersion();
-        textViewRegState.setText(sdkVersion );
+        String localIP = PeerInfo.getLocalIP( this );
+        textViewVersion.setText(sdkVersion + "\n\nLocalIP: " + localIP);
+        editTextCallee.setText(localIP);
+        textViewMediaStats.setVisibility( INVISIBLE );
 
-        j2c.mediaCreate( this, 0 );
+        j2c.mediaCreate( this,0 );
         j2c.cosdkInit();
 
         buttonAnswer.setEnabled( false );
@@ -80,11 +89,12 @@ public class VoiceCallActivity extends AppCompatActivity implements IStateListen
         buttonInvite.setOnClickListener( new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                //textViewMediaStats.setVisibility( VISIBLE );
                 buttonInvite.setEnabled( false );
                 buttonHangup.setEnabled( true );
                 callee = editTextCallee.getText().toString();
                 Sound.Play( VoiceCallActivity.this, CallDir.OUTGOING );
-                textInfoList = "";
+                callInfoList = "";
                 j2c.mediaStartRecv( voicelocal.getPort() );
                 callid = j2c.cosdkInvite( callee );
                 //j2c.mediaStartSend( voiceremote.getPort(), callee, "PCMA");
@@ -101,6 +111,7 @@ public class VoiceCallActivity extends AppCompatActivity implements IStateListen
                 j2c.cosdkAnswer( -1 );
                 j2c.mediaStartRecv( voicelocal.getPort() );
                 j2c.mediaStartSend( voiceremote.getPort(), voiceremote.getAddr(), "PCMA" );
+                textViewMediaStats.setVisibility( VISIBLE );
                 Log.d( "cosdk", "click annswer remoteaddr:port " + voiceremote.getAddr() + ":" + voiceremote.getPort() );
             }
         } );
@@ -113,7 +124,7 @@ public class VoiceCallActivity extends AppCompatActivity implements IStateListen
                 Sound.StopPlay();
 
                 j2c.cosdkHangup( -1 );
-                j2c.mediaStop();
+                mediaStopAll();
             }
         } );
     }
@@ -125,23 +136,28 @@ public class VoiceCallActivity extends AppCompatActivity implements IStateListen
     @Override
     protected void onDestroy() {
         Sound.StopPlay();
-        j2c.mediaStop();
+        mediaStopAll();
         j2c.cosdkExit();
         j2c.mediaDelete();
         super.onDestroy();
     }
-
+    public void mediaStopAll(){
+        textViewMediaStats.setVisibility( INVISIBLE );
+        j2c.mediaStop();
+    }
     @Override
-    public int SdkCallback(final int s, final int c, final String info) {
-        Log.d( "cosdk", "java  SdkCallback s=" + s + " c=" + c + " info=" + info );
-        textInfoList += (info + "\n");
+    public int SdkCallback(final int s, final int c, final String info, final String jsonData) {
         final SipEvent code = SipEvent.values()[c];
-        //JSONObject jsonObject = null;
-        //JSONObject jsonObjectVoice = null;
+
+        if(s == 1) {
+            Log.d( "cosdk", "java  SdkCallback s=" + s + " c=" + c + " info=" + info );
+            callInfoList += (info + "\n");
+        }
+
         try {
             if (s == 1) {
                 if (code == SipEvent.SIP_CALL_INVITE || code == SipEvent.SIP_CALL_ANSWERED) {  // SIP_CALL_INVITE
-                    JSONObject jsonObject = new JSONObject( info );
+                    JSONObject jsonObject = new JSONObject( jsonData );
                     callid = jsonObject.getInt( "callid" );
 
                     JSONObject jsonObjectVoice = (JSONObject) jsonObject.get( "voice" );
@@ -158,8 +174,11 @@ public class VoiceCallActivity extends AppCompatActivity implements IStateListen
             @Override
             public void run() {
                 if (s == 0) {
-                    //textViewRegState.setText( "Register State: " + info );
+                    //textViewVersion.setText( "Register State: " + info );
+                } else if (s == 2) {   // mediaStatistics
+                    textViewMediaStats.setText( info );
                 } else if (s == 1) {
+                    SipEvent code = SipEvent.values()[c];
                     Log.d( "cosdk", "java runOnUiThread s=" + s + " c=" + c + " info=" + info );
                     if (code == SipEvent.SIP_CALL_CLOSED || code == SipEvent.SIP_CALL_MESSAGE_ANSWERED ||
                             code == SipEvent.SIP_CALL_CANCELLED || code == SipEvent.SIP_CALL_GLOBALFAILURE) {
@@ -176,12 +195,15 @@ public class VoiceCallActivity extends AppCompatActivity implements IStateListen
                             buttonInvite.setEnabled( false );
                             buttonHangup.setEnabled( true );
                             Sound.Play( VoiceCallActivity.this, CallDir.INCOMING );
-                            textInfoList = info + "\n";
+                            callInfoList = info + "\n";
                             Log.d( "cosdk", "recv incoming call" );
+
+                            editTextCallee.setText(voiceremote.getAddr()); // only for call next time
                             break;
                         case SIP_CALL_ANSWERED:
                             Sound.StopPlay();
                             j2c.mediaStartSend( voiceremote.getPort(), voiceremote.getAddr(), "PCMA" );
+                            textViewMediaStats.setVisibility( VISIBLE );
                             Log.d( "cosdk", "recv 200ok" );
                             break;
 
@@ -189,16 +211,13 @@ public class VoiceCallActivity extends AppCompatActivity implements IStateListen
                             break;*/
 
                         case SIP_CALL_CLOSED:  // receive bye
-
                             //Sound.StopPlay();
-                            j2c.mediaStop();
+                            mediaStopAll();
                             break;
                         case SIP_CALL_MESSAGE_ANSWERED: // response of bye, did return to -1, and tid add 1
                             buttonAnswer.setEnabled( false );
                             buttonHangup.setEnabled( false );
                             buttonInvite.setEnabled( true );
-                            //Sound.StopPlay();
-                            //j2c.mediaStop();
                             break;
                         case SIP_CALL_CANCELLED:  // cancel
 
@@ -207,12 +226,12 @@ public class VoiceCallActivity extends AppCompatActivity implements IStateListen
                         case SIP_CALL_GLOBALFAILURE: // be refused recv 6xx
 
                             //Sound.StopPlay();
-                            j2c.mediaStop();
+                            mediaStopAll();
                             break;
                         default:
                             break;
                     }
-                    textViewCallState.setText( "Call State: " + textInfoList );
+                    textViewCallState.setText( callInfoList );
                 }
             }
         } );

@@ -1,7 +1,7 @@
 package com.goke.media.ui.call;
 
 public interface IStateListener {
-    int SdkCallback(int s, int c, String info);
+    int SdkCallback(int s, int c, String info, String jsonData);
 }
 
 enum SipEvent {

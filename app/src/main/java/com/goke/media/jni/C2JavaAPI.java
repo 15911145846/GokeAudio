@@ -18,9 +18,9 @@ public class C2JavaAPI implements IStateListener {
         callStateListener = null;
     }*/
 
-    public int SdkCallback(int s, int c, String info) {
+    public int SdkCallback(int s, int c, String info, String jsonData) {
         if(callStateListener != null){
-            callStateListener.SdkCallback(s,c,info);
+            callStateListener.SdkCallback(s,c,info, jsonData);
         }
         return 0;
     }
